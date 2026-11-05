@@ -1059,11 +1059,14 @@ function guardOut(phone, text) {          // returns text to send, or null if it
   return text;
 }
 
+let latestQR = '', waState = 'starting';
 client.on('qr', (qr) => {
+  latestQR = qr; waState = 'waiting_for_scan';
   console.log('\nScan this QR with WhatsApp > Settings > Linked devices > Link a device:\n');
-  qrcode.generate(qr, { small: true });
+  if (!process.env.PORT) qrcode.generate(qr, { small: true });   // on a server, open the QR web page instead
+  else console.log('Open your public link + /qr?key=YOUR_QR_PASSWORD to scan the QR code as a clear image.');
 });
-client.on('authenticated', () => console.log('Authenticated.'));
+client.on('authenticated', () => { waState = 'connected'; latestQR = ''; console.log('Authenticated.'); });
 client.on('auth_failure', (m) => console.error('Auth failure:', m));
 client.on('ready', () => {
   console.log('✅ SV Developers bot is ready and listening.');
@@ -1181,3 +1184,28 @@ async function start(attempt = 1) {
 }
 if (require.main === module) start();
 module.exports = { handle, detectProjects, detectTopics, getSession, extractName, guardOut, isDuplicateIn, start };
+
+
+// ---------------------------------------------------------------- QR web page (for Railway / servers)
+// Open  https://YOUR-RAILWAY-DOMAIN/qr?key=YOUR_QR_PASSWORD  and scan the QR with WhatsApp > Linked devices.
+if (process.env.PORT) {
+  const http = require('http');
+  const crypto = require('crypto');
+  const QR_PASSWORD = process.env.QR_PASSWORD || '';
+  const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
+  if (!QR_PASSWORD) console.log('QR page is OFF: set QR_PASSWORD in Railway Variables to enable /qr?key=...');
+  http.createServer(async (req, res) => {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname !== '/qr') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('SV Developers bot is running'); }
+    if (!QR_PASSWORD || !same(u.searchParams.get('key') || '', QR_PASSWORD)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('Forbidden'); }
+    let body;
+    if (latestQR && waState !== 'connected') {
+      try {
+        const svg = await require('qrcode').toString(latestQR, { type: 'svg', margin: 4, width: 360 });
+        body = `<p>Open WhatsApp &gt; Settings &gt; Linked devices &gt; Link a device, then scan:</p>${svg}<p>The code refreshes about every 20 seconds. This page reloads itself.</p>`;
+      } catch (e) { body = 'Could not draw the QR: ' + e.message; }
+    } else body = waState === 'connected' ? '<h2>✅ WhatsApp is connected. Nothing to scan.</h2>' : '<p>Starting up... this page reloads itself. Please wait.</p>';
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
+    res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><body style="font-family:sans-serif;text-align:center;padding:20px">${body}</body>`);
+  }).listen(process.env.PORT, () => console.log('QR page listening on port ' + process.env.PORT));
+}
