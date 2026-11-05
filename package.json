@@ -1,0 +1,17 @@
+{
+  "name": "sv-developers-whatsapp-bot",
+  "version": "2.0.0",
+  "description": "Free WhatsApp bot for SV Developers (whatsapp-web.js + Google Sheets logging)",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "check-sheet": "node check-sheet.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.34.7"
+  }
+}
