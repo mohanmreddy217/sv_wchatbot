@@ -35,7 +35,8 @@ const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on pl
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const LLM_MAX_PER_MIN = parseInt(process.env.LLM_MAX_PER_MIN || '8', 10);
-const DATA_DIR = path.join(__dirname, 'data');
+const STORAGE_ROOT = process.env.DATA_PATH || __dirname;   // on Railway set DATA_PATH=/data (a Volume) so logins and customers survive restarts
+const DATA_DIR = path.join(STORAGE_ROOT, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 console.log(
   `SV Developers bot v7 (real phone numbers + professional tone) | .env found: ${fs.existsSync('.env') ? 'yes' : 'NO'} | ` +
@@ -1016,8 +1017,12 @@ async function handle(ctx, text) {
 
 // ------------------------------------------------------------ WhatsApp client
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
-  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
+  authStrategy: new LocalAuth({ dataPath: path.join(STORAGE_ROOT, '.wwebjs_auth') }),
+  puppeteer: {
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  },
 });
 
 const seen = new Set();

@@ -1,13 +1,5 @@
-@"
-.env
-.env.*
-!.env.example
 node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
-coverage/
-coverage-*
-.nyc_output/
-*.log
-DevToolsActivePort
-"@ | Out-File -FilePath .gitignore -Encoding utf8
+data/
+.env
