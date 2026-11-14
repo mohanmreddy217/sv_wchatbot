@@ -1,5 +1,5 @@
 /*
- SV Developers WhatsApp bot (whatsapp-web.js)  -  v7
+ SV Developers WhatsApp bot (whatsapp-web.js)  -  v6
  - NEW: numbered menus, budget-based project suggestions, project links, photos/videos link.
  - Friendly, natural replies (no menus). Understands normal typed questions.
  - Asks the customer's name, remembers it, and uses it naturally.
@@ -35,11 +35,10 @@ const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on pl
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const LLM_MAX_PER_MIN = parseInt(process.env.LLM_MAX_PER_MIN || '8', 10);
-const STORAGE_ROOT = process.env.DATA_PATH || __dirname;   // on Railway set DATA_PATH=/data (a Volume) so logins and customers survive restarts
-const DATA_DIR = path.join(STORAGE_ROOT, 'data');
+const DATA_DIR = path.join(__dirname, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 console.log(
-  `SV Developers bot v7 (real phone numbers + professional tone) | .env found: ${fs.existsSync('.env') ? 'yes' : 'NO'} | ` +
+  `SV Developers bot v6 (number menus + budget suggestions) | .env found: ${fs.existsSync('.env') ? 'yes' : 'NO'} | ` +
   `Google Sheet logging: ${SHEET_URL ? 'ON' : 'OFF (SHEET_URL missing in .env)'} | AI fallback: ${GEMINI_API_KEY ? 'ON' : 'off'}`
 );
 
@@ -373,18 +372,6 @@ function customer(phone) {
   if (!customers[phone]) customers[phone] = { name: '', waName: '', interested: '', firstSeen: nowIST() };
   return customers[phone];
 }
-// WhatsApp sometimes hides the real number behind an internal "@lid" id. These helpers make sure the
-// sheet and the owner alert show the REAL mobile number when we have it, and never a fake-looking ID.
-const hiddenIds = new Set();                      // ids whose real number WhatsApp did not give us
-function realNumberOf(id) {
-  const c = customers[id];
-  if (c && c.contact) return c.contact;           // number the customer typed, or the real one we resolved
-  return hiddenIds.has(id) ? '' : id;
-}
-function sheetPhone(id) {                         // value for the "Phone" column
-  const n = realNumberOf(id);
-  return n || `Hidden by WhatsApp (ID ${String(id).slice(-6)})`;
-}
 
 // ------------------------------------------------------------ logging
 const sheetQueue = [];
@@ -437,39 +424,28 @@ async function flushSheet() {
 }
 
 function logMessage(dir, phone, name, text) {
-  const row = [nowIST(), sheetPhone(phone), name || '', dir, text];
+  const row = [nowIST(), phone, name || '', dir, text];
   fs.appendFileSync(path.join(DATA_DIR, 'conversations.jsonl'), JSON.stringify({ row }) + '\n');
   logSheet('Messages', row);
 }
 
 function syncCustomer(phone, lastMsg, inc) {   // one row per customer in the "Customers" tab
   const c = customer(phone);
-  const key = hiddenIds.has(phone) ? `ID:${phone}` : phone;          // stable key for the Customers tab
-  logSheet('Customers', [key, c.name || '', c.waName || '', c.interested || '', nowIST(), lastMsg || '', realNumberOf(phone)], { inc: !!inc });
+  logSheet('Customers', [phone, c.name || '', c.waName || '', c.interested || '', nowIST(), lastMsg || '', c.contact || ''], { inc: !!inc });
 }
 
 async function saveLead(ctx, name, kind, detail) {
-  const c = customer(ctx.phone);
-  const number = realNumberOf(ctx.phone);                       // real mobile number, or '' if WhatsApp hides it
-  const row = [nowIST(), number || sheetPhone(ctx.phone), name || '', kind, detail, 'New'];
+  const row = [nowIST(), ctx.phone, name || '', kind, detail, 'New'];   // ctx.phone = best number we have
   fs.appendFileSync(path.join(DATA_DIR, 'leads.jsonl'), JSON.stringify({ row }) + '\n');
   logSheet('Leads', row);
   console.log('NEW LEAD:', row.join(' | '));
   if (OWNER_NUMBER && ctx.client) {
     try {
       const id = await ctx.client.getNumberId(OWNER_NUMBER);
-      const target = id ? id._serialized : `${OWNER_NUMBER}@c.us`;
-      const lines = [
-        '🔔 *New lead*',
-        `Type: ${kind}`,
-        `Name: ${name || c.name || '-'}`,
-        `Mobile: ${number ? '+' + number : 'Not available (WhatsApp hides it). Please reply to the chat or ask the customer.'}`,
-      ];
-      if (number) lines.push(`Chat: https://wa.me/${number}`);
-      if (c.waName) lines.push(`WhatsApp name: ${c.waName}`);
-      if (c.budget) lines.push(`Budget: ${c.budget}`);
-      lines.push(`Detail: ${detail}`);
-      await ctx.client.sendMessage(target, lines.join('\n'));
+      if (id) {
+        await ctx.client.sendMessage(id._serialized,
+          `🔔 *New lead*\nType: ${kind}\nName: ${name || '-'}\nPhone: ${ctx.phone}\nDetail: ${detail}`);
+      }
     } catch (e) { console.error('Owner notify failed:', e.message); }
   }
 }
@@ -620,7 +596,7 @@ function welcomeBack(s, name, firstInSession) {
         `Welcome back, ${name}! 😊 It's good to hear from you again.`,
         `Hello ${name}! 👋 Thank you for getting in touch again.`,
       ])
-    : pick(s, 'hiagain', [`Hello again, ${name}! 😊`, `Hello ${name}, how may I assist you?`]);
+    : pick(s, 'hiagain', [`Hello again, ${name}! 😊`, `Hello ${name}! 🙂 I'm listening.`]);
 }
 
 // ------------------------------------------- optional free AI (Gemini) fallback
@@ -655,7 +631,7 @@ async function askLLM(s, custName) {
     else turns.push({ role: h.role, parts: [{ text: h.text }] });
   }
   const system =
-    'You are the courteous WhatsApp assistant of SV Developers, a real estate company in Hyderabad, India. ' +
+    'You are the friendly WhatsApp assistant of SV Developers, a real estate company in Hyderabad, India. ' +
     'Sound professional, polite and respectful, like an experienced real estate consultant. Never repeat the same wording you used earlier in the chat. ' +
     (custName ? `The customer's name is ${custName}; use it only occasionally. ` : '') +
     'Answer ONLY using the company information below. If the answer is not in it, say you do not have that detail ' +
@@ -709,7 +685,7 @@ async function handle(ctx, text) {
       s.state = 'ASK_PHONE'; s.data = { kind, detail, who, confirmText, tries: 0 };
       return say('Before I pass this to our team, could you share the best mobile number to reach you on? 📱');
     }
-    await saveLead(ctx, who, kind, detail);
+    await saveLead({ ...ctx, phone: cust.contact || ctx.phone }, who, kind, detail);
     return say(confirmText);
   };
 
@@ -718,22 +694,9 @@ async function handle(ctx, text) {
     syncCustomer(ctx.phone, t, false);
   };
 
-  // If the customer types a mobile number at any time and WhatsApp hid the real one, keep it for the team.
-  if (!ctx.phoneKnown && !cust.contact && s.state !== 'ASK_PHONE') {
-    const pm = t.replace(/[\s-]/g, '').match(/(?:\+?91)?([6-9]\d{9})(?!\d)/);
-    if (pm) {
-      cust.contact = '91' + pm[1]; saveCustomers(); syncCustomer(ctx.phone, t, false);
-      if (/^[+\d\s-]{10,16}$/.test(t)) {
-        s.state = 'MENU'; s.data = {}; s.menu = 'MAIN';
-        await say(`Thank you${cust.name ? `, ${cust.name}` : ''}. I have noted your mobile number *${pm[1]}* so that our team can reach you.`);
-        return say(mainMenu());
-      }
-    }
-  }
-
   if (/^(cancel|stop|reset|back)$/.test(low)) {
     s.state = 'MENU'; s.data = {};
-    return say('Certainly. Reply *menu* to see all options, or *7* at any time to *book a FREE site visit*.');
+    return say('No problem! 😊 Reply *menu* to see all options, or *7* anytime to *book a FREE site visit*.');
   }
   if (/^(menu|main menu|options|0)$/.test(low) && s.state !== 'ASK_PHONE') {
     s.state = 'MENU'; s.data = {}; s.menu = 'MAIN';
@@ -756,18 +719,18 @@ async function handle(ctx, text) {
     const d = s.data;
     const m = t.replace(/[\s-]/g, '').match(/(?:\+?91)?([6-9]\d{9})/);
     if (m) {
-      cust.contact = '91' + m[1]; saveCustomers(); syncCustomer(ctx.phone, t, false);
+      cust.contact = m[1]; saveCustomers(); syncCustomer(ctx.phone, t, false);
       s.state = 'MENU'; s.data = {};
-      await saveLead(ctx, d.who, d.kind, d.detail);
-      return say(`${d.confirmText}\n\nI have noted your mobile number *${m[1]}*, thank you 🙏`);
+      await saveLead({ ...ctx, phone: m[1] }, d.who, d.kind, d.detail);
+      return say(`${d.confirmText}\n\nI've noted your number ${m[1]} 👍`);
     }
     if (/^(no|skip|later|not now|don.?t|dont)\b/.test(low) || d.tries >= 1) {
       s.state = 'MENU'; s.data = {};
       await saveLead(ctx, d.who, d.kind, d.detail);
-      return say(`${d.confirmText}\n\nCertainly, our team will reach you here on WhatsApp. You may also call us on ${BIZ.phone}.`);
+      return say(`${d.confirmText}\n\nNo problem, we'll reach you here on WhatsApp. You can also call us on ${BIZ.phone}.`);
     }
     d.tries += 1;
-    return say("I apologise, I could not read a 10-digit mobile number. Could you please type it like 98765 43210? (or reply *skip*)");
+    return say("Sorry, I couldn't read a 10-digit mobile number there 🙏 Could you type it like 98765 43210? (or say *skip*)");
   }
 
   // ---- helpers for numbered menus, budget suggestions and site-visit booking
@@ -817,7 +780,7 @@ async function handle(ctx, text) {
       if (n === 9) return say(mediaText(null));
       if (n === 10) return say(GENERAL.office);
     }
-    return say(`I apologise, ${n} is not one of the options 🙏 Please reply with a number from the list below.\n\n${k ? projectMenu(k) : mainMenu()}`);
+    return say(`Sorry, ${n} is not one of the options 🙏 Please reply with a number from the list below.\n\n${k ? projectMenu(k) : mainMenu()}`);
   };
 
   // ---- waiting for the customer's budget
@@ -834,7 +797,7 @@ async function handle(ctx, text) {
   }
 
   // ---- a bare number (customer is using the menu)
-  if (numOnly !== null && s.state === 'MENU' && s.turn > 1) return runMenu(numOnly);
+  if (numOnly !== null && s.state === 'MENU' && numOnly <= 10) return runMenu(numOnly);
 
   // ---- learn the customer's name
   let nameJust = null;
@@ -845,8 +808,8 @@ async function handle(ctx, text) {
   }
   const parts = [];
   const nameAck = (emoji = true) => pick(s, 'nameack', [
-    `Thank you, ${cust.name}.`, `It is a pleasure to assist you, ${cust.name}.`, `Thank you for sharing your name, ${cust.name}.`,
-  ]) + (emoji ? ' 🙏' : '');
+    `Nice to meet you, ${cust.name}!`, `Lovely to meet you, ${cust.name}!`, `Thanks, ${cust.name}!`,
+  ]) + (emoji ? ' 😊' : '');
 
   // ---- booking flow: name -> project -> date/time (questions in between are still answered)
   let reminder = '';
@@ -869,10 +832,10 @@ async function handle(ctx, text) {
         s.data.name = cust.name;
         s.state = s.data.project ? 'ASK_DATE' : 'ASK_PROJECT';
         return say(s.data.project
-          ? `Thank you, ${cust.name}. 📅 What date and time would suit you? (for example, Saturday 11 AM)`
-          : `Thank you, ${cust.name}. 🏡 Which project would you like to visit?\n${PROJECT_PICK}\n\nReply with the project number, or say *not sure*.`);
+          ? `Thanks, ${cust.name}! 📅 What date and time would suit you? (for example, Saturday 11 AM)`
+          : `Thanks, ${cust.name}! 🏡 Which project would you like to visit?\n${PROJECT_PICK}\n\nReply with the project number, or say *not sure*.`);
       }
-      return say("I apologise, I could not understand that. May I know your name, please? 🙏");
+      return say("Sorry, I didn't quite catch that 🙂 What's your name?");
     }
     reminder = "Whenever you're ready, just tell me your *name* and we'll continue the booking (or say *cancel*).";
   } else if (s.state === 'ASK_PROJECT') {
@@ -883,8 +846,8 @@ async function handle(ctx, text) {
     if (project) {
       s.data.project = project; s.state = 'ASK_DATE';
       return say(project === 'Not sure yet'
-        ? "Certainly, our team will help you choose 👍 What date and time would suit you for the visit? (for example, Saturday 11 AM)"
-        : `${pick(s, 'projok', ['Excellent choice', 'Noted, thank you', 'Thank you'])} 👍 What date and time would suit you? (for example, Saturday 11 AM)`);
+        ? "No problem, our team will help you choose 👍 What date and time would suit you for the visit? (for example, Saturday 11 AM)"
+        : `${pick(s, 'projok', ['Perfect', 'Great choice', 'Sounds good'])} 👍 What date and time would suit you? (for example, Saturday 11 AM)`);
     }
     reminder = `Which project would you like to visit?\n${PROJECT_PICK}\n\nReply with the project number, or say *not sure*.`;
   } else if (s.state === 'ASK_DATE') {
@@ -916,17 +879,13 @@ async function handle(ctx, text) {
   // ---- callback request
   if (flags.agent) {
     return completeLead('callback', t.slice(0, 120), leadName(),
-      `👍 Certainly${cust.name ? `, ${cust.name}` : ''}! Our team will call you soon. You can also call us directly on ${BIZ.phone}.`);
+      `👍 Sure${cust.name ? `, ${cust.name}` : ''}! Our team will call you soon. You can also call us directly on ${BIZ.phone}.`);
   }
 
   // a message that was only a name
   if (nameJust && nameJust.nameOnly && !inBooking) {
     s.menu = 'MAIN';
     await say(`${nameAck()} How may I assist you today?`);
-    if (needPhone() && !s.askedPhone) {
-      s.askedPhone = true;
-      await say('So that our team can assist you better, you may also share your *mobile number* here (optional) 📱');
-    }
     return say(mainMenu());
   }
   if (nameJust && !nameJust.nameOnly && !inBooking) parts.push(nameAck());
@@ -1017,12 +976,8 @@ async function handle(ctx, text) {
 
 // ------------------------------------------------------------ WhatsApp client
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: path.join(STORAGE_ROOT, '.wwebjs_auth') }),
-  puppeteer: {
-    headless: true,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-  },
+  authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
+  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'] },
 });
 
 const seen = new Set();
@@ -1036,6 +991,9 @@ function enqueue(phone, fn) { // process each customer's messages in order
 
 // --- duplicate protection -------------------------------------------------
 const recentIn = new Map();
+const IGNORE_TYPES = new Set(['notification_template', 'e2e_notification', 'notification', 'protocol', 'gp2', 'call_log',
+  'interactive', 'album', 'revoked', 'broadcast_notification', 'ciphertext', 'unknown', 'reaction', 'poll_vote']);
+const MEDIA_TYPES = new Set(['image', 'video', 'audio', 'ptt', 'document', 'sticker', 'location', 'vcard', 'multi_vcard']);
 function isDuplicateIn(phone, body, ts) {
   const now = Date.now();
   for (const [k, v] of recentIn) if (now - v > 15000) recentIn.delete(k);
@@ -1055,25 +1013,53 @@ function guardOut(phone, text) {          // returns text to send, or null if it
   const prev = m.get(key);
   m.set(key, now);
   if (prev && now - prev < 8000) return null;                         // exact same message a moment ago: skip
-  if (prev) return rand(['Certainly, here is the information again:\n\n', 'Happy to share this once more:\n\n']) + text;
+  if (prev) return rand(['Certainly, here it is again 😊\n\n', 'Happy to repeat that 🙂\n\n']) + text;
   return text;
 }
 
-let latestQR = '', waState = 'starting';
+// ---- QR page for cloud hosting (Railway): https://YOUR-APP.up.railway.app/qr?key=YOUR_QR_KEY
+// Set QR_KEY in the Variables of your hosting. Without QR_KEY the QR page stays disabled.
+const http = require('http');
+const QRCode = require('qrcode');
+const QR_KEY = process.env.QR_KEY || '';
+const PORT = parseInt(process.env.PORT || '0', 10);
+let latestQr = '';
+let waState = 'starting';
+if (PORT) {
+  http.createServer(async (req, res) => {
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      const send = (code, type, body) => { res.writeHead(code, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(body); };
+      if (u.pathname === '/' || u.pathname === '/health') return send(200, 'text/plain', 'SV Developers bot is running');
+      if (u.pathname !== '/qr') return send(404, 'text/plain', 'Not found');
+      if (!QR_KEY) return send(403, 'text/plain', 'QR page is disabled. Add a QR_KEY variable in your hosting settings.');
+      if (u.searchParams.get('key') !== QR_KEY) return send(403, 'text/plain', 'Wrong or missing key.');
+      let inner;
+      if (latestQr) {
+        const img = await QRCode.toDataURL(latestQr, { width: 320, margin: 2 });
+        inner = `<h2>Scan with WhatsApp</h2><p>Settings → Linked devices → Link a device</p><img src="${img}" width="320" height="320" alt="QR">` +
+                '<p>The QR changes every ~20 seconds. This page refreshes by itself.</p>';
+      } else if (waState === 'ready') inner = '<h2>✅ WhatsApp is linked</h2><p>The bot is running. Nothing to scan.</p>';
+      else inner = `<h2>Waiting for the QR code…</h2><p>Status: ${waState}. This page refreshes by itself.</p>`;
+      send(200, 'text/html', `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="10"><title>SV Developers bot</title><body style="font-family:sans-serif;text-align:center;padding:24px">${inner}</body>`);
+    } catch (e) { res.writeHead(500); res.end('error'); }
+  }).listen(PORT, '0.0.0.0', () => console.log(`Web page listening on port ${PORT}` + (QR_KEY ? ' (QR page enabled at /qr?key=...)' : ' (set QR_KEY to enable the QR page)')));
+}
+
 client.on('qr', (qr) => {
-  latestQR = qr; waState = 'waiting_for_scan';
+  latestQr = qr; waState = 'waiting for scan';
   console.log('\nScan this QR with WhatsApp > Settings > Linked devices > Link a device:\n');
-  if (!process.env.PORT) qrcode.generate(qr, { small: true });   // on a server, open the QR web page instead
-  else console.log('Open your public link + /qr?key=YOUR_QR_PASSWORD to scan the QR code as a clear image.');
+  qrcode.generate(qr, { small: true });
 });
-client.on('authenticated', () => { waState = 'connected'; latestQR = ''; console.log('Authenticated.'); });
+client.on('authenticated', () => { latestQr = ''; waState = 'authenticated'; console.log('Authenticated.'); });
 client.on('auth_failure', (m) => console.error('Auth failure:', m));
 client.on('ready', () => {
+  latestQr = ''; waState = 'ready';
   console.log('✅ SV Developers bot is ready and listening.');
   if (!SHEET_URL) console.error('⚠️  SHEET_URL is empty, so nothing will be saved to Google Sheets. Check your .env file.');
   else logSheet('Messages', [nowIST(), '-', '-', 'SYSTEM', 'Bot started (connection test)']);
 });
-client.on('disconnected', (r) => console.error('Disconnected:', r, '- restart the bot (node bot.js).'));
+client.on('disconnected', (r) => { waState = 'disconnected'; console.error('Disconnected:', r, '- restart the bot (node bot.js).'); });
 
 const withTimeout = (promise, ms) =>
   Promise.race([promise, sleep(ms).then(() => { throw new Error(`timed out after ${ms} ms`); })]);
@@ -1084,32 +1070,18 @@ async function resolvePhone(msg, from) {
   if (!from.endsWith('@lid')) return { phone: from.split('@')[0], known: true };
   const hit = lidCache.get(from);
   if (hit && (hit.known || Date.now() - hit.at < 600000)) return hit;
-  const lidDigits = from.split('@')[0];
-  const good = (v) => {                                    // a real phone number, not the hidden id itself
-    const d = String(v || '').split('@')[0].replace(/\D/g, '');
-    return /^\d{10,13}$/.test(d) && d !== lidDigits ? d : null;
-  };
-  let phone = null, how = '';
-  const attempts = [
-    ['message data', async () => { const r = msg._data || {}; return good(r.senderPn) || good(r.participantPn) || good(r.pn) || good(r.notifyPn); }],
-    ['contact', async () => { const c = await withTimeout(msg.getContact(), 4000); return good(c && c.number) || good(c && c.id && c.id.server === 'c.us' && c.id.user); }],
-    ['contact by id', async () => { const c = await withTimeout(client.getContactById(from), 4000); return good(c && c.number) || good(c && c.id && c.id.server === 'c.us' && c.id.user); }],
-    ['lid lookup', async () => { const r = await withTimeout(client.getContactLidAndPhone([from]), 4000); return good(r && r[0] && r[0].pn); }],
-    ['browser lookup', async () => withTimeout(client.pupPage.evaluate((lid) => {
-      try {
-        const S = window.Store, wid = S.WidFactory.createWid(lid);
-        const pn = (S.LidUtils && S.LidUtils.getPhoneNumber && S.LidUtils.getPhoneNumber(wid)) ||
-          (S.Contact && S.Contact.get(lid) && S.Contact.get(lid).phoneNumber);
-        return pn ? (pn._serialized || String(pn)) : null;
-      } catch (e) { return null; }
-    }, from).then(good), 4000)],
-  ];
-  for (const [name, fn] of attempts) {
-    try { const r = await fn(); if (r) { phone = r; how = name; break; } } catch (_) {}
+  let phone = null;
+  try { const c = await withTimeout(msg.getContact(), 4000); if (c && /^\d{8,15}$/.test(c.number || '')) phone = c.number; } catch (_) {}
+  if (!phone && typeof client.getContactLidAndPhone === 'function') {
+    try {
+      const r = await withTimeout(client.getContactLidAndPhone([from]), 4000);
+      const pn = r && r[0] && r[0].pn;
+      if (pn) phone = String(pn).split('@')[0];
+    } catch (_) {}
   }
-  const res = phone ? { phone, known: true, at: Date.now() } : { phone: lidDigits, known: false, at: Date.now() };
+  const res = phone ? { phone, known: true, at: Date.now() } : { phone: from.split('@')[0], known: false, at: Date.now() };
   lidCache.set(from, res);
-  console.log(phone ? `   resolved real number: ${phone} (via ${how})` : '   (WhatsApp is hiding this customer\'s real number; the bot will ask for it politely)');
+  console.log(phone ? `   resolved real number: ${phone}` : '   (WhatsApp is hiding this customer\'s real number; the bot will ask for it when a lead is created)');
   return res;
 }
 
@@ -1122,6 +1094,10 @@ async function onIncoming(msg, source) {
     if (id) { seen.add(id); if (seen.size > 2000) seen.delete(seen.values().next().value); }
 
     console.log(`📩 [${source}] from ${from} type=${msg.type} text="${(msg.body || '').slice(0, 60)}"`);
+    if (from.startsWith('0@') || IGNORE_TYPES.has(msg.type) || (msg.type !== 'chat' && !MEDIA_TYPES.has(msg.type))) {
+      console.log('   (WhatsApp system message, ignored)');
+      return;
+    }
     if (isDuplicateIn(from, msg.body || `[${msg.type}]`, msg.timestamp)) { console.log('   (duplicate event ignored)'); return; }
     if (Date.now() / 1000 - msg.timestamp > 300) { console.log('   (ignored: older than 5 minutes)'); return; }
 
@@ -1131,8 +1107,6 @@ async function onIncoming(msg, source) {
     const { phone, known: phoneKnown } = await resolvePhone(msg, from);
 
     const cust = customer(phone);
-    if (phoneKnown) { hiddenIds.delete(phone); if (!cust.contact) { cust.contact = phone; saveCustomers(); } }
-    else hiddenIds.add(phone);
     if (waName && cust.waName !== waName) { cust.waName = waName; saveCustomers(); }
     const shownName = cust.name || waName;
 
@@ -1149,7 +1123,7 @@ async function onIncoming(msg, source) {
     if (msg.type !== 'chat') {
       logMessage('IN', phone, shownName, `[${msg.type}]`);
       syncCustomer(phone, `[${msg.type}]`, true);
-      return enqueue(phone, () => say('I apologise, I can currently read text messages only. Kindly type your question 🙏'));
+      return enqueue(phone, () => say('Sorry, I can only read text messages for now 🙏 Please type your question.'));
     }
     logMessage('IN', phone, shownName, msg.body);
     syncCustomer(phone, msg.body, true);
@@ -1184,28 +1158,3 @@ async function start(attempt = 1) {
 }
 if (require.main === module) start();
 module.exports = { handle, detectProjects, detectTopics, getSession, extractName, guardOut, isDuplicateIn, start };
-
-
-// ---------------------------------------------------------------- QR web page (for Railway / servers)
-// Open  https://YOUR-RAILWAY-DOMAIN/qr?key=YOUR_QR_PASSWORD  and scan the QR with WhatsApp > Linked devices.
-if (process.env.PORT) {
-  const http = require('http');
-  const crypto = require('crypto');
-  const QR_PASSWORD = process.env.QR_PASSWORD || '';
-  const same = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
-  if (!QR_PASSWORD) console.log('QR page is OFF: set QR_PASSWORD in Railway Variables to enable /qr?key=...');
-  http.createServer(async (req, res) => {
-    const u = new URL(req.url, 'http://x');
-    if (u.pathname !== '/qr') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('SV Developers bot is running'); }
-    if (!QR_PASSWORD || !same(u.searchParams.get('key') || '', QR_PASSWORD)) { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('Forbidden'); }
-    let body;
-    if (latestQR && waState !== 'connected') {
-      try {
-        const svg = await require('qrcode').toString(latestQR, { type: 'svg', margin: 4, width: 360 });
-        body = `<p>Open WhatsApp &gt; Settings &gt; Linked devices &gt; Link a device, then scan:</p>${svg}<p>The code refreshes about every 20 seconds. This page reloads itself.</p>`;
-      } catch (e) { body = 'Could not draw the QR: ' + e.message; }
-    } else body = waState === 'connected' ? '<h2>✅ WhatsApp is connected. Nothing to scan.</h2>' : '<p>Starting up... this page reloads itself. Please wait.</p>';
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
-    res.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5"><body style="font-family:sans-serif;text-align:center;padding:20px">${body}</body>`);
-  }).listen(process.env.PORT, () => console.log('QR page listening on port ' + process.env.PORT));
-}
