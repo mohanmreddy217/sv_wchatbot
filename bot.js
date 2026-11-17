@@ -35,7 +35,8 @@ const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on pl
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const LLM_MAX_PER_MIN = parseInt(process.env.LLM_MAX_PER_MIN || '8', 10);
-const DATA_DIR = path.join(__dirname, 'data');
+const STORAGE = process.env.STORAGE_DIR || __dirname;
+const DATA_DIR = path.join(STORAGE, 'data');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 console.log(
   `SV Developers bot v6 (number menus + budget suggestions) | .env found: ${fs.existsSync('.env') ? 'yes' : 'NO'} | ` +
@@ -974,10 +975,23 @@ async function handle(ctx, text) {
   }
 }
 
-// ------------------------------------------------------------ WhatsApp client
+const SESSION_DIR = path.join(STORAGE, '.wwebjs_auth');
+// remove stale Chrome lock files left by a crash, otherwise Chrome refuses to start
+try {
+  for (const d of fs.existsSync(SESSION_DIR) ? fs.readdirSync(SESSION_DIR) : []) {
+    for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+      try { fs.rmSync(path.join(SESSION_DIR, d, f), { force: true }); } catch (_) {}
+    }
+  }
+} catch (_) {}
+
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
-  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'] },
+  authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
+  puppeteer: {
+    headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'],
+  },
 });
 
 const seen = new Set();
@@ -1052,14 +1066,21 @@ client.on('qr', (qr) => {
   qrcode.generate(qr, { small: true });
 });
 client.on('authenticated', () => { latestQr = ''; waState = 'authenticated'; console.log('Authenticated.'); });
-client.on('auth_failure', (m) => console.error('Auth failure:', m));
+client.on('auth_failure', (m) => {
+  console.error('Auth failure:', m, '- exiting so the host restarts the bot.');
+  setTimeout(() => process.exit(1), 2000);
+});
 client.on('ready', () => {
   latestQr = ''; waState = 'ready';
   console.log('✅ SV Developers bot is ready and listening.');
   if (!SHEET_URL) console.error('⚠️  SHEET_URL is empty, so nothing will be saved to Google Sheets. Check your .env file.');
   else logSheet('Messages', [nowIST(), '-', '-', 'SYSTEM', 'Bot started (connection test)']);
 });
-client.on('disconnected', (r) => { waState = 'disconnected'; console.error('Disconnected:', r, '- restart the bot (node bot.js).'); });
+client.on('disconnected', (r) => {
+  waState = 'disconnected';
+  console.error('Disconnected:', r, '- exiting so the host (Railway) restarts the bot automatically.');
+  setTimeout(() => process.exit(1), 2000);
+});
 
 const withTimeout = (promise, ms) =>
   Promise.race([promise, sleep(ms).then(() => { throw new Error(`timed out after ${ms} ms`); })]);
