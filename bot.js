@@ -230,8 +230,9 @@ function shareCard(s, name) {
     `✨ _"${pick(s, 'quote', QUOTES)}"_ ✨`, '',
     '🌟 *Approved plots • Farm villa plots • Apartments*',
     'Aler • Bhongir • Shamirpet, Hyderabad', '',
-    '📲 *Share this link with your family & friends* so they can chat with us anytime 👇',
-    `💬 ${CHAT_LINK}`, '',
+    '📲 *Share this link with your family & friends* so they can chat with us anytime 👇', '',
+    '🟢 *START CHAT*',
+    `👉 ${CHAT_LINK}`, '',
     `🌐 ${BIZ.website}`,
     `📞 ${BIZ.phone}`,
   ].join('\n');
