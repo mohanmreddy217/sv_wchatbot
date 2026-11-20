@@ -32,6 +32,7 @@ const SHEET_URL = process.env.SHEET_URL || '';
 const SHEET_SECRET = process.env.SHEET_SECRET || '';
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '').replace(/\D/g, ''); // e.g. 917799774169
 const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on plot booking';
+const CHAT_LINK = process.env.CHAT_LINK || 'https://wa.me/917816077189?text=menu';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const LLM_MAX_PER_MIN = parseInt(process.env.LLM_MAX_PER_MIN || '8', 10);
@@ -210,6 +211,15 @@ function parseBudget(low) {
   return { lo: a, hi: a, range: false };
 }
 
+// Tappable links (WhatsApp turns any URL into a clickable link)
+function quickLinks() {
+  return [
+    '🔗 *Quick links*',
+    `💬 *Chat with us:* ${CHAT_LINK}`,
+    `🌐 *Visit our website:* ${BIZ.website}`,
+  ].join('\n');
+}
+
 function mainMenu() {
   const lines = [
     '*How may I help you today?* Please reply with a number 👇', '',
@@ -223,6 +233,7 @@ function mainMenu() {
     `${NUM[10]} Office address & contact`,
   ];
   if (OFFER_TEXT) lines.push('', `🎁 *Current offer:* ${OFFER_TEXT}`);
+  lines.push('', quickLinks());
   lines.push('', 'You can also type your question normally, or reply *menu* at any time.');
   return lines.join('\n');
 }
