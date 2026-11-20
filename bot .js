@@ -13,7 +13,7 @@
 */
 const fs = require('fs');
 const path = require('path');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 
 // ------------------------------------------------------------------ config
@@ -32,7 +32,9 @@ const SHEET_URL = process.env.SHEET_URL || '';
 const SHEET_SECRET = process.env.SHEET_SECRET || '';
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '').replace(/\D/g, ''); // e.g. 917799774169
 const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on plot booking';
-const CHAT_LINK = process.env.CHAT_LINK || 'https://wa.me/917816077189?text=menu';
+const CHAT_LINK = process.env.CHAT_LINK || 'https://wa.me/917816077189?text=menu';   // shareable chatbot link
+const LOGO_URL = process.env.LOGO_URL || '';                                          // optional: picture link (https://...)
+const LOGO_FILE = process.env.LOGO_FILE || '';                                        // optional: picture file name
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const LLM_MAX_PER_MIN = parseInt(process.env.LLM_MAX_PER_MIN || '8', 10);
@@ -142,7 +144,7 @@ const PROJECTS = {
 const PROJECT_KEYS = Object.keys(PROJECTS);
 const PROJECT_NAMES = PROJECT_KEYS.map((k) => `*${PROJECTS[k].title}*`).join(', ');
 
-const NUM = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+const NUM = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟', '1️⃣1️⃣'];
 
 // Approximate price range (in LAKHS), short place name and highlights for each project.
 // Project links: set LINK_SRI_NIVASAM, LINK_SRI_CITY, LINK_SRI_VANAM, LINK_SIRI_VANAM, LINK_SV_APARTMENT in .env
@@ -211,14 +213,30 @@ function parseBudget(low) {
   return { lo: a, hi: a, range: false };
 }
 
-// Tappable links (WhatsApp turns any URL into a clickable link)
+// Tappable website link shown in the main menu (WhatsApp turns any URL into a clickable link)
 function quickLinks() {
+  return `🌐 *Visit SV Developers:* ${BIZ.website}`;
+}
+
+// ---- "Share our chatbot link" card: greeting + quotation (sent together with the SV Developers picture)
+const QUOTES = [
+  'A plot of land is not just an asset, it is the first brick of your family\'s tomorrow.',
+  'Great homes begin on solid ground. Build your dreams on land you can trust.',
+  'Invest in land: it is the one thing they are not making any more of.',
+];
+function shareCard(s, name) {
   return [
-    '🔗 *Quick links*',
-    `💬 *Chat with us:* ${CHAT_LINK}`,
-    `🌐 *Visit our website:* ${BIZ.website}`,
+    `Hello${name ? ', ' + name : ''}! 👋 Welcome to *${BIZ.name}* 🏡`, '',
+    `✨ _"${pick(s, 'quote', QUOTES)}"_ ✨`, '',
+    '🌟 *Approved plots • Farm villa plots • Apartments*',
+    'Aler • Bhongir • Shamirpet, Hyderabad', '',
+    '📲 *Share this link with your family & friends* so they can chat with us anytime 👇',
+    `💬 ${CHAT_LINK}`, '',
+    `🌐 ${BIZ.website}`,
+    `📞 ${BIZ.phone}`,
   ].join('\n');
 }
+const CHAT_LINK_ASK = /\b(chat\s?bot|bot|whatsapp|chat)\s*(link|url)\b|\b(share|shareable)\b.*\b(link|bot|chat|number)\b|\blink\b.*\b(chat\s?bot|bot)\b|\bsend\b.*\b(chat\s?bot|bot)\b/;
 
 function mainMenu() {
   const lines = [
@@ -231,6 +249,7 @@ function mainMenu() {
     `${NUM[8]} Talk to our team (call back)`,
     `${NUM[9]} Photos & videos`,
     `${NUM[10]} Office address & contact`,
+    `${NUM[11]} *Share our chatbot link* (send to friends & family)`,
   ];
   if (OFFER_TEXT) lines.push('', `🎁 *Current offer:* ${OFFER_TEXT}`);
   lines.push('', quickLinks());
@@ -689,6 +708,11 @@ async function handle(ctx, text) {
   pushHist(s, 'user', t);
   const say = async (msg) => { pushHist(s, 'model', msg); return ctx.say(msg); };
   const leadName = () => cust.name || ctx.name || '';
+  const shareChat = async () => {
+    const card = shareCard(s, cust.name || ctx.name || '');
+    pushHist(s, 'model', card);
+    return ctx.sendImage ? ctx.sendImage(card) : ctx.say(card);   // picture + caption (falls back to text)
+  };
 
   // A lead is only useful if the team can call back. If WhatsApp hides the real number, ask for it.
   const needPhone = () => !ctx.phoneKnown && !cust.contact;
@@ -714,6 +738,8 @@ async function handle(ctx, text) {
     s.state = 'MENU'; s.data = {}; s.menu = 'MAIN';
     return say(mainMenu());
   }
+
+  if (CHAT_LINK_ASK.test(low) && s.state !== 'ASK_PHONE') { s.state = 'MENU'; s.data = {}; return shareChat(); }
 
   let projects = detectProjects(low);
   const numOnly = /^\d{1,3}$/.test(t.replace(/[.)\s]/g, '')) ? parseInt(t.replace(/[.)\s]/g, ''), 10) : null;
@@ -791,6 +817,7 @@ async function handle(ctx, text) {
       if (n === 8) return askCallback('Callback | via menu');
       if (n === 9) return say(mediaText(null));
       if (n === 10) return say(GENERAL.office);
+      if (n === 11) return shareChat();
     }
     return say(`Sorry, ${n} is not one of the options 🙏 Please reply with a number from the list below.\n\n${k ? projectMenu(k) : mainMenu()}`);
   };
@@ -809,7 +836,7 @@ async function handle(ctx, text) {
   }
 
   // ---- a bare number (customer is using the menu)
-  if (numOnly !== null && s.state === 'MENU' && numOnly <= 10) return runMenu(numOnly);
+  if (numOnly !== null && s.state === 'MENU' && numOnly <= 11) return runMenu(numOnly);
 
   // ---- learn the customer's name
   let nameJust = null;
@@ -1117,6 +1144,23 @@ async function resolvePhone(msg, from) {
   return res;
 }
 
+// SV Developers picture: put your logo/photo in this folder as sv_developers.jpg (or .png), or set LOGO_FILE / LOGO_URL in .env
+let logoCache;
+async function loadLogo() {
+  if (logoCache !== undefined) return logoCache;
+  try {
+    const names = [LOGO_FILE, 'sv_developers.jpg', 'sv_developers.jpeg', 'sv_developers.png', 'logo.jpg', 'logo.png'].filter(Boolean);
+    for (const n of names) {
+      const f = path.isAbsolute(n) ? n : path.join(__dirname, n);
+      if (fs.existsSync(f)) { logoCache = MessageMedia.fromFilePath(f); return logoCache; }
+    }
+    if (LOGO_URL) { logoCache = await MessageMedia.fromUrl(LOGO_URL, { unsafeMime: true }); return logoCache; }
+  } catch (e) { console.error('Could not load the SV Developers picture:', e.message || e); }
+  console.warn('⚠️  No SV Developers picture found (add sv_developers.jpg next to bot.js). Sending the share card as text.');
+  logoCache = null;
+  return null;
+}
+
 async function onIncoming(msg, source) {
   try {
     const from = msg.from || '';
@@ -1152,6 +1196,16 @@ async function onIncoming(msg, source) {
       logMessage('OUT', phone, cust.name || waName, final);
     };
 
+    // Sends the SV Developers picture with the text as its caption (plain text if no picture is set up)
+    const sendImage = async (caption) => {
+      const media = await loadLogo();
+      if (!media) return say(caption);
+      await sleep(900 + Math.random() * 900);
+      try { await withTimeout(client.sendMessage(from, media, { caption }), 45000); }
+      catch (e) { console.error(`Picture send to ${from} failed, sending text instead:`, e.message || e); return say(caption); }
+      logMessage('OUT', phone, cust.name || waName, `[picture] ${caption}`);
+    };
+
     if (msg.type !== 'chat') {
       logMessage('IN', phone, shownName, `[${msg.type}]`);
       syncCustomer(phone, `[${msg.type}]`, true);
@@ -1159,7 +1213,7 @@ async function onIncoming(msg, source) {
     }
     logMessage('IN', phone, shownName, msg.body);
     syncCustomer(phone, msg.body, true);
-    enqueue(phone, () => handle({ phone, phoneKnown, name: waName, say, client }, msg.body));
+    enqueue(phone, () => handle({ phone, phoneKnown, name: waName, say, sendImage, client }, msg.body));
   } catch (e) {
     console.error('Message error:', e.message || e);
   }
