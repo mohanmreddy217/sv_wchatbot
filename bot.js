@@ -998,10 +998,20 @@ try {
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
+  authTimeoutMs: 120000,
   puppeteer: {
     headless: true,
+    timeout: 120000,
+    protocolTimeout: 120000,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run'],
+    args: [
+      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+      '--disable-gpu', '--no-first-run', '--no-zygote', '--disable-extensions',
+    ],
+  },
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1017054665-alpha.html',
   },
 });
 
