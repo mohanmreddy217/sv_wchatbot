@@ -31,7 +31,9 @@ const qrcode = require('qrcode-terminal');
 const SHEET_URL = process.env.SHEET_URL || '';
 const SHEET_SECRET = process.env.SHEET_SECRET || '';
 const OWNER_NUMBER = (process.env.OWNER_NUMBER || '').replace(/\D/g, ''); // e.g. 917799774169
-const OFFER_TEXT = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on plot booking';
+const DEFAULT_OFFER = process.env.OFFER_TEXT ?? 'Happy Diwali! 2 gm gold free on plot booking';
+let OFFERS = DEFAULT_OFFER ? [DEFAULT_OFFER] : [];     // the owner can change these on WhatsApp: "admin add offer ..."
+const offerText = () => OFFERS.join('; ');
 const CHAT_LINK = process.env.CHAT_LINK || 'https://wa.me/917816077189?text=menu';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -139,9 +141,10 @@ const PROJECTS = {
     },
   },
 };
-const PROJECT_KEYS = Object.keys(PROJECTS);
-const PROJECT_NAMES = PROJECT_KEYS.map((k) => `*${PROJECTS[k].title}*`).join(', ');
+let PROJECT_KEYS = Object.keys(PROJECTS);
+let PROJECT_NAMES = PROJECT_KEYS.map((k) => `*${PROJECTS[k].title}*`).join(', ');
 
+const numTag = (i) => (i < 5 ? NUM[i + 1] : '▫️');   // main menu numbers 6-10 are quick actions, so only 5 projects get a number
 const NUM = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
 
 // Approximate price range (in LAKHS), short place name and highlights for each project.
@@ -174,7 +177,12 @@ for (const k of PROJECT_KEYS) {
   PROJECTS[k].link = process.env['LINK_' + k.toUpperCase()] || BIZ.website;
   PROJECTS[k].media = process.env['MEDIA_' + k.toUpperCase()] || PROJECTS[k].link;
 }
-const PROJECT_PICK = PROJECT_KEYS.map((k, i) => `${NUM[i + 1]} *${PROJECTS[k].title}*`).join('\n');
+const BUILTIN = new Set(PROJECT_KEYS);
+const BUILTIN_APPROVAL = {
+  sri_nivasam: 'HMDA approved (LP No. 000013/L0/PIg/HMDA/2023)', sri_city: 'DTCP and RERA approved', sv_apartment: 'HMDA approved',
+  sri_vanam: 'clear title and spot registration', siri_vanam: 'clear title and spot registration',
+};
+let PROJECT_PICK = PROJECT_KEYS.map((k, i) => `${NUM[i + 1]} *${PROJECTS[k].title}*`).join('\n');
 
 const BANDS = [
   { label: 'Below ₹5 lakhs', lo: 0, hi: 5 },
@@ -185,7 +193,7 @@ const BANDS = [
 ];
 
 const fmtL = (n) => (n >= 100 ? `${+(n / 100).toFixed(2)} crore${n >= 200 ? 's' : ''}` : `${n} lakhs`);
-const priceStr = (k) => `₹${PROJECTS[k].price[0]}–${PROJECTS[k].price[1]} lakhs`;
+const priceStr = (k) => (PROJECTS[k].price[0] === PROJECTS[k].price[1] ? `₹${PROJECTS[k].price[0]} lakhs` : `₹${PROJECTS[k].price[0]}–${PROJECTS[k].price[1]} lakhs`);
 const bLabel = (b) => b.label || (b.lo === b.hi ? `₹${fmtL(b.hi)}` : `₹${b.lo}–${fmtL(b.hi)}`);
 
 function normalizeInput(text) {
@@ -224,7 +232,8 @@ function mainMenu() {
   const lines = [
     '*How may I help you today?* Please reply with a number 👇', '',
     '🏡 *Our Projects*',
-    ...PROJECT_KEYS.map((k, i) => `${NUM[i + 1]} *${PROJECTS[k].title}* – ${PROJECTS[k].place} • ${priceStr(k)}`), '',
+    ...PROJECT_KEYS.map((k, i) => `${numTag(i)} *${PROJECTS[k].title}* – ${PROJECTS[k].place} • ${priceStr(k)}`),
+    ...(PROJECT_KEYS.length > 5 ? ['(For the ▫️ projects, just type the project name)'] : []), '',
     '⚡ *Quick actions*',
     `${NUM[6]} Find the best project for my *budget*`,
     `${NUM[7]} *Book a FREE site visit*`,
@@ -232,7 +241,8 @@ function mainMenu() {
     `${NUM[9]} Photos & videos`,
     `${NUM[10]} Office address & contact`,
   ];
-  if (OFFER_TEXT) lines.push('', `🎁 *Current offer:* ${OFFER_TEXT}`);
+  if (OFFERS.length === 1) lines.push('', `🎁 *Current offer:* ${OFFERS[0]}`);
+  else if (OFFERS.length > 1) lines.push('', '🎁 *Current offers:*', ...OFFERS.map((o) => `• ${o}`));
   lines.push('', quickLinks());
   lines.push('', 'You can also type your question normally, or reply *menu* at any time.');
   return lines.join('\n');
@@ -287,7 +297,7 @@ function mediaText(k) {
 function priceOverview() {
   return [
     '💰 *Approximate price ranges*', '',
-    ...PROJECT_KEYS.map((k, i) => `${NUM[i + 1]} *${PROJECTS[k].title}* – ${priceStr(k)}`), '',
+    ...PROJECT_KEYS.map((k, i) => `${numTag(i)} *${PROJECTS[k].title}* – ${priceStr(k)}`), '',
     'The exact price depends on size, facing and availability.',
     "👉 Tell me your *budget* (for example *20 lakhs*) and I'll suggest the best options, or reply with a project number for details.",
   ].join('\n');
@@ -319,7 +329,7 @@ function budgetText(b, name) {
   }
   const line = (k) => {
     const p = PROJECTS[k];
-    return `${NUM[PROJECT_KEYS.indexOf(k) + 1]} ${p.emoji} *${p.title}* – ${p.place}\n     💰 *${priceStr(k)}* • ${p.highlights[0]}`;
+    return `${numTag(PROJECT_KEYS.indexOf(k))} ${p.emoji} *${p.title}* – ${p.place}\n     💰 *${priceStr(k)}* • ${p.highlights[0]}`;
   };
   const sec = (title, arr) => `${title}\n${arr.map(line).join('\n\n')}`;
   const blocks = [];
@@ -356,20 +366,35 @@ const NAME_ASKS = [
 ];
 
 const GENERAL = {
-  approvals: [
-    '✅ *Our approvals at a glance:*', '',
-    '• *Sri Nivasam:* HMDA approved (LP No. 000013/L0/PIg/HMDA/2023)',
-    '• *Sri City:* DTCP and RERA approved',
-    '• *SV Apartment:* HMDA approved',
-    '• *Sri Vanam & Siri Vanam:* clear title and spot registration', '',
-    'Our team will gladly walk you through the documents during a *FREE site visit* (reply *7* to book).',
-  ].join('\n'),
-  loan: `🏦 *Bank loan is available* for *Sri Nivasam*. For the other projects, please call ${BIZ.phone} and our team will guide you.`,
-  registration: `📝 *Spot registration* is offered at Siri Vanam, Sri City and SV Apartment (Sri Vanam also lists clear title and spot registration). For timelines, please call ${BIZ.phone}.`,
+  get approvals() {
+    const lines = PROJECT_KEYS.map((k) => {
+      const a = BUILTIN_APPROVAL[k] || PROJECTS[k].approval;
+      return a ? `• *${PROJECTS[k].title}:* ${a}` : null;
+    }).filter(Boolean);
+    if (!lines.length) return `✅ For approval details, please call ${BIZ.phone} and our team will guide you.`;
+    return ['✅ *Our approvals at a glance:*', '', ...lines, '',
+      'Our team will gladly walk you through the documents during a *FREE site visit* (reply *7* to book).'].join('\n');
+  },
+  get loan() {
+    const ks = PROJECT_KEYS.filter((k) => PROJECTS[k].facts && PROJECTS[k].facts.loan);
+    return ks.length
+      ? `🏦 *Bank loan is available* for ${ks.map((k) => `*${PROJECTS[k].title}*`).join(', ')}. For the other projects, please call ${BIZ.phone} and our team will guide you.`
+      : `🏦 For bank loan details, please call ${BIZ.phone} and our team will guide you.`;
+  },
+  get registration() {
+    const ks = PROJECT_KEYS.filter((k) => PROJECTS[k].facts && PROJECTS[k].facts.registration);
+    return ks.length
+      ? `📝 *Spot registration* is offered at ${ks.map((k) => `*${PROJECTS[k].title}*`).join(', ')}. For timelines, please call ${BIZ.phone}.`
+      : `📝 For registration details, please call ${BIZ.phone}.`;
+  },
   office: `📍 You are most welcome to visit our office:\n${BIZ.address}\n\n📞 ${BIZ.phone}\n✉️ ${BIZ.email}\n🌐 ${BIZ.website}\n\nPlease call before you come so that someone is available to assist you 😊`,
   visit_info: `🚗 Yes, you are welcome to visit! Please contact us a little before you come so that someone can walk the layout with you.\n\n📞 ${BIZ.phone}, or reply *7* and I will arrange a *FREE site visit* for you.`,
   career: `💼 We're hiring for *Telecallers* and *Graphic designers*. Call ${BIZ.phone} or apply through the form on ${BIZ.website}`,
-  about: '🏢 *SV Developers* is a real estate development company creating quality residential plots, farm villa plots, premium villa plots and apartments across Aler, Bhongir and Shamirpet in the Hyderabad region, with a focus on transparent dealings and clear documentation.\n\n*5 approved projects* • 312 plots • 30 flats at SV Apartment',
+  get about() {
+    const changed = content.deleted.length || Object.keys(content.custom).length;
+    return '🏢 *SV Developers* is a real estate development company creating quality residential plots, farm villa plots, premium villa plots and apartments across Aler, Bhongir and Shamirpet in the Hyderabad region, with a focus on transparent dealings and clear documentation.\n\n' +
+      (changed ? `*${PROJECT_KEYS.length} projects*` : '*5 approved projects* • 312 plots • 30 flats at SV Apartment');
+  },
 };
 
 // ------------------------------------------------------------ customers
@@ -446,8 +471,16 @@ function syncCustomer(phone, lastMsg, inc) {   // one row per customer in the "C
   logSheet('Customers', [phone, c.name || '', c.waName || '', c.interested || '', nowIST(), lastMsg || '', c.contact || ''], { inc: !!inc });
 }
 
+// Only a REAL phone number is ever shown. WhatsApp's hidden "@lid" id (a long number that is not a phone) is never used.
+const normPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 10 ? '91' + d : d; };
+function fmtPhone(p) {
+  const d = normPhone(p);
+  if (d.length === 12 && d.startsWith('91')) return `+91 ${d.slice(2, 7)} ${d.slice(7)}`;
+  return d ? `+${d}` : '';
+}
 async function saveLead(ctx, name, kind, detail) {
-  const row = [nowIST(), ctx.phone, name || '', kind, detail, 'New'];   // ctx.phone = best number we have
+  const real = ctx.phoneKnown && ctx.phone ? normPhone(ctx.phone) : '';
+  const row = [nowIST(), real || 'Not shared (hidden by WhatsApp)', name || '', kind, detail, 'New'];
   fs.appendFileSync(path.join(DATA_DIR, 'leads.jsonl'), JSON.stringify({ row }) + '\n');
   logSheet('Leads', row);
   console.log('NEW LEAD:', row.join(' | '));
@@ -455,8 +488,11 @@ async function saveLead(ctx, name, kind, detail) {
     try {
       const id = await ctx.client.getNumberId(OWNER_NUMBER);
       if (id) {
+        const phoneLine = real
+          ? `Phone: ${fmtPhone(real)}\n💬 Chat: https://wa.me/${real}`
+          : "Phone: not shared (WhatsApp is hiding this customer's number). Open the chat in the bot's WhatsApp to reply.";
         await ctx.client.sendMessage(id._serialized,
-          `🔔 *New lead*\nType: ${kind}\nName: ${name || '-'}\nPhone: ${ctx.phone}\nDetail: ${detail}`);
+          `🔔 *New lead*\nType: ${kind}\nName: ${name || '-'}\n${phoneLine}\nWhatsApp name: ${ctx.name || '-'}\nDetail: ${detail}`);
       }
     } catch (e) { console.error('Owner notify failed:', e.message); }
   }
@@ -480,13 +516,14 @@ function pushHist(s, role, text) {
 }
 
 // ------------------------------------------------------ understanding text
-const PROJECT_RES = [
+const BASE_RES = [
   ['sri_nivasam', /nivasam|bhongir|swarnagiri|swaranagiri|swarnagiry/],
   ['sri_city', /sri ?city|aler town|premium/],
   ['siri_vanam', /siri ?vanam|sirivam|siri ?vam|gummadav|jeedikal/],
   ['sri_vanam', /sri ?vanam|patelguda/],
   ['sv_apartment', /apartment|\bflats?\b|2 ?bhk|shamirpet|medchal/],
 ];
+let PROJECT_RES = BASE_RES.slice();      // rebuilt by refreshContent() when the owner adds or deletes projects
 
 const TOPIC_RES = [ // English + common Telugu/Hindi words typed in English letters
   ['price', /pric|cost|\brate|budget|how much|per sq|entha|\benta\b|kimat|keemat|\bdaam|dhara|ధర|कीमत|दाम/],
@@ -521,8 +558,9 @@ function detectProjects(low) {
   const out = [];
   for (const [k, re] of PROJECT_RES) if (re.test(low)) out.push(k);
   if (!out.length) {
-    if (/farm|plantation/.test(low)) out.push('sri_vanam', 'siri_vanam');
-    else if (/villa/.test(low)) out.push('sri_city', 'sri_vanam', 'siri_vanam');
+    const have = (...ks) => ks.filter((k) => PROJECTS[k]);
+    if (/farm|plantation/.test(low)) out.push(...have('sri_vanam', 'siri_vanam'));
+    else if (/villa/.test(low)) out.push(...have('sri_city', 'sri_vanam', 'siri_vanam'));
   }
   return out;
 }
@@ -576,7 +614,7 @@ function topicAnswer(s, keys, topics, name) {
     return topics.map((tp) => {
       if (tp === 'price') return pick(s, 'price', PRICE_VARIANTS)(k);
       if (tp === 'media') return mediaText(k);
-      if (tp === 'loan' && !p.facts.loan) return `🏦 I only have bank loan details for Sri Nivasam (it's available there). For ${p.title}, please call ${BIZ.phone} and our team will confirm.`;
+      if (tp === 'loan' && !p.facts.loan) return `🏦 I don't have the bank loan details for ${p.title} on hand. Please call ${BIZ.phone} and our team will confirm.`;
       return p.facts[tp] ||
         `ℹ️ I don't have the ${TOPIC_WORD[tp] || tp} details for ${p.title} on hand right now. Our team can tell you exactly: call ${BIZ.phone} or reply *8* and they'll ring you.`;
     }).join('\n\n');
@@ -587,13 +625,13 @@ function topicAnswer(s, keys, topics, name) {
 
 function listProjects(keys, intro) {
   return `${intro || `We have ${keys.length} approved projects:`}\n\n` +
-    keys.map((k) => `${NUM[PROJECT_KEYS.indexOf(k) + 1]} ${PROJECTS[k].emoji} *${PROJECTS[k].title}* – ${PROJECTS[k].short} • ${priceStr(k)}`).join('\n') +
+    keys.map((k) => `${numTag(PROJECT_KEYS.indexOf(k))} ${PROJECTS[k].emoji} *${PROJECTS[k].title}* – ${PROJECTS[k].short} • ${priceStr(k)}`).join('\n') +
     '\n\nReply with the *project number* for full details, or *menu* for all options.';
 }
 
 function sizeSummary() {
   const rows = PROJECT_KEYS.filter((k) => PROJECTS[k].facts.size).map((k) => PROJECTS[k].facts.size);
-  return `${rows.join('\n\n')}\n\nFor Sri Vanam sizes, please call *${BIZ.phone}*.`;
+  return `${rows.join('\n\n')}\n\nFor other sizes, please call *${BIZ.phone}*.`;
 }
 
 function welcomeNew(s) {
@@ -623,7 +661,7 @@ function knowledge() {
     'Approximate price ranges (the exact price depends on size, facing and availability; the team confirms on a call):',
     ...PROJECT_KEYS.map((k) => `${PROJECTS[k].title}: ${priceStr(k)}`),
     `Photos and videos: ${BIZ.media}`,
-    OFFER_TEXT ? `Current offer on the website: ${OFFER_TEXT}` : '',
+    OFFERS.length ? `Current offer(s): ${offerText()}` : '',
   ].join('\n\n');
   return KNOWLEDGE;
 }
@@ -681,6 +719,8 @@ async function handle(ctx, text) {
   const t = normalizeInput(text);
   const low = t.toLowerCase();
   const s = getSession(ctx.phone);
+  s.last = (s.last || []).filter((k) => PROJECTS[k]);                       // a project may have been deleted by the owner
+  if (s.menuProject && !PROJECTS[s.menuProject]) { s.menu = 'MAIN'; s.menuProject = ''; }
   const cust = customer(ctx.phone);
   s.turn += 1;
   const firstInSession = !s.greeted;
@@ -697,7 +737,7 @@ async function handle(ctx, text) {
       s.state = 'ASK_PHONE'; s.data = { kind, detail, who, confirmText, tries: 0 };
       return say('Before I pass this to our team, could you share the best mobile number to reach you on? 📱');
     }
-    await saveLead({ ...ctx, phone: cust.contact || ctx.phone }, who, kind, detail);
+    await saveLead({ ...ctx, phone: cust.contact || ctx.phone, phoneKnown: ctx.phoneKnown || !!cust.contact }, who, kind, detail);
     return say(confirmText);
   };
 
@@ -733,10 +773,10 @@ async function handle(ctx, text) {
     if (m) {
       cust.contact = m[1]; saveCustomers(); syncCustomer(ctx.phone, t, false);
       s.state = 'MENU'; s.data = {};
-      await saveLead({ ...ctx, phone: m[1] }, d.who, d.kind, d.detail);
+      await saveLead({ ...ctx, phone: m[1], phoneKnown: true }, d.who, d.kind, d.detail);
       return say(`${d.confirmText}\n\nI've noted your number ${m[1]} 👍`);
     }
-    if (/^(no|skip|later|not now|don.?t|dont)\b/.test(low) || d.tries >= 1) {
+    if (/^(no|skip|later|not now|don.?t|dont)\b/.test(low) || d.tries >= 2) {
       s.state = 'MENU'; s.data = {};
       await saveLead(ctx, d.who, d.kind, d.detail);
       return say(`${d.confirmText}\n\nNo problem, we'll reach you here on WhatsApp. You can also call us on ${BIZ.phone}.`);
@@ -785,7 +825,7 @@ async function handle(ctx, text) {
       if (n === 8) return askCallback(`Callback | ${PROJECTS[k].title}`);
       if (n === 9) return say(mediaText(k) + projectFooter([k], true));
     } else {
-      if (n >= 1 && n <= PROJECT_KEYS.length) return showProject(PROJECT_KEYS[n - 1]);
+      if (n >= 1 && n <= Math.min(5, PROJECT_KEYS.length)) return showProject(PROJECT_KEYS[n - 1]);
       if (n === 6) { s.state = 'ASK_BUDGET'; return say(budgetPrompt()); }
       if (n === 7) return beginBooking(s.last.length === 1 ? PROJECTS[s.last[0]].title : '');
       if (n === 8) return askCallback('Callback | via menu');
@@ -911,9 +951,12 @@ async function handle(ctx, text) {
   if (flags.visitInfo) parts.push(GENERAL.visit_info);
   if (flags.office) { parts.push(GENERAL.office); topics = topics.filter((x) => x !== 'location'); }
   if (flags.offer) {
-    parts.push(OFFER_TEXT
-      ? `🎁 Right now we have a special offer: *${OFFER_TEXT}*! The terms may vary, so our team will confirm the details. Reply *7* to *book a FREE site visit*, or call ${BIZ.phone}.`
-      : `Please call ${BIZ.phone} to know about current offers.`);
+    const tail = 'The terms may vary, so our team will confirm the details. Reply *7* to *book a FREE site visit*, or call ' + BIZ.phone + '.';
+    parts.push(OFFERS.length === 0
+      ? `Please call ${BIZ.phone} to know about current offers.`
+      : OFFERS.length === 1
+        ? `🎁 Right now we have a special offer: *${OFFERS[0]}*! ${tail}`
+        : `🎁 Right now we have these special offers:\n${OFFERS.map((o) => `• *${o}*`).join('\n')}\n\n${tail}`);
   }
   if (flags.career) parts.push(GENERAL.career);
   if (flags.about) parts.push(GENERAL.about);
@@ -986,6 +1029,280 @@ async function handle(ctx, text) {
   }
 }
 
+// ====================================================================== OWNER ADMIN
+// The owner can add / delete projects and offers by sending "admin ..." messages to the bot.
+// Changes are saved in data/content.json (inside STORAGE_DIR; on Railway this needs the Volume to survive redeploys).
+// Who is the owner?  (1) a chat whose real number equals OWNER_NUMBER, or (2) a chat that sent "admin login <ADMIN_PIN>".
+const CONTENT_FILE = path.join(DATA_DIR, 'content.json');
+const ADMINS_FILE = path.join(DATA_DIR, 'admins.json');
+const ADMIN_PIN = (process.env.ADMIN_PIN || '').trim();
+const MAX_PROJECTS = 10;
+let content = { custom: {}, deleted: [], price: {}, link: {}, offers: null };
+try { Object.assign(content, JSON.parse(fs.readFileSync(CONTENT_FILE, 'utf8'))); } catch (_) {}
+let adminIds = new Set();
+try { adminIds = new Set(JSON.parse(fs.readFileSync(ADMINS_FILE, 'utf8'))); } catch (_) {}
+function saveContent() {
+  try { fs.writeFileSync(CONTENT_FILE, JSON.stringify(content, null, 2)); } catch (e) { console.error('Could not save content.json:', e.message); }
+}
+function saveAdmins() {
+  try { fs.writeFileSync(ADMINS_FILE, JSON.stringify([...adminIds])); } catch (e) { console.error('Could not save admins.json:', e.message); }
+}
+
+const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30);
+function titleRegex(title) {
+  const words = String(title).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return /(?!)/;                           // title has no latin letters: never match by name
+  return new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(' ?'));
+}
+function refreshContent() {                                   // call after PROJECTS or OFFERS change
+  PROJECT_KEYS = Object.keys(PROJECTS);
+  PROJECT_NAMES = PROJECT_KEYS.map((k) => `*${PROJECTS[k].title}*`).join(', ');
+  PROJECT_PICK = PROJECT_KEYS.map((k, i) => `${NUM[i + 1]} *${PROJECTS[k].title}*`).join('\n');
+  PROJECT_RES = [
+    ...BASE_RES.filter(([k]) => PROJECTS[k]),
+    ...PROJECT_KEYS.filter((k) => PROJECTS[k].custom).map((k) => [k, titleRegex(PROJECTS[k].title)]),
+  ];
+  KNOWLEDGE = '';
+}
+function applyContent() {                                     // once at start-up
+  for (const k of content.deleted) delete PROJECTS[k];
+  for (const [k, p] of Object.entries(content.custom)) PROJECTS[k] = { ...p };
+  for (const [k, v] of Object.entries(content.price)) if (PROJECTS[k]) PROJECTS[k].price = v;
+  for (const [k, v] of Object.entries(content.link)) if (PROJECTS[k]) { PROJECTS[k].link = v; PROJECTS[k].media = v; }
+  if (Array.isArray(content.offers)) OFFERS = content.offers.slice();
+  refreshContent();
+}
+applyContent();
+
+function addProject(d) {
+  const base = slugify(d.title) || 'project';
+  let key = base, n = 2;
+  while (PROJECTS[key] || content.custom[key] || content.deleted.includes(key)) key = `${base}_${n++}`;
+  const p = {
+    custom: true, title: d.title, emoji: '🏡', place: d.place, short: `${d.place} • ${d.kind}`, price: d.price,
+    highlights: d.highlights, approval: d.approval || '',
+    pitch: `${d.title} is our ${d.kind} project at ${d.place} 🏡 ${d.highlights.join('. ')}.`,
+    facts: { location: `📍 ${d.title} is at ${d.place}.` },
+    link: d.link || BIZ.website, media: d.link || BIZ.website,
+  };
+  if (d.approval) p.facts.approvals = `✅ ${d.approval}`;
+  content.custom[key] = p;
+  PROJECTS[key] = { ...p };
+  saveContent(); refreshContent();
+  return key;
+}
+function deleteProject(k) {
+  if (!PROJECTS[k]) return false;
+  delete PROJECTS[k];
+  if (content.custom[k]) delete content.custom[k];
+  else if (!content.deleted.includes(k)) content.deleted.push(k);
+  delete content.price[k]; delete content.link[k];
+  saveContent(); refreshContent();
+  return true;
+}
+function setPrice(k, range) {
+  PROJECTS[k].price = range;
+  if (content.custom[k]) content.custom[k].price = range; else content.price[k] = range;
+  saveContent(); refreshContent();
+}
+function setLink(k, url) {
+  PROJECTS[k].link = url; PROJECTS[k].media = url;
+  if (content.custom[k]) { content.custom[k].link = url; content.custom[k].media = url; } else content.link[k] = url;
+  saveContent(); refreshContent();
+}
+function saveOffers() { content.offers = OFFERS.slice(); saveContent(); refreshContent(); }
+
+function parseRange(v) {                                      // "20-30", "25", "1.5 crore" -> [lo, hi] in lakhs
+  const low = String(v).replace(/[₹,]/g, '').toLowerCase();
+  const m = low.match(/(\d+(?:\.\d+)?)\s*(?:-|–|to)?\s*(\d+(?:\.\d+)?)?/);
+  if (!m) return null;
+  const mult = /\bcr/.test(low) ? 100 : 1;
+  const a = parseFloat(m[1]) * mult, b = (m[2] ? parseFloat(m[2]) : parseFloat(m[1])) * mult;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  return lo > 0 && hi <= 100000 ? [lo, hi] : null;
+}
+function parseLink(v) {
+  const t = String(v).trim();
+  if (/^https?:\/\/\S+$/i.test(t)) return t;
+  if (/^[\w-]+(\.[\w-]+)+\S*$/.test(t)) return 'https://' + t;
+  return null;
+}
+function parseHighlights(v) {
+  let parts = String(v).split(/\n|;/);
+  if (parts.length === 1 && /,/.test(parts[0])) parts = parts[0].split(',');
+  parts = parts.map((x) => x.replace(/^\s*(?:[-•*✔✅⭐]+|\d+[.)])\s*/, '').trim()).filter(Boolean);
+  if (!parts.length || parts.length > 8 || parts.some((x) => x.length > 120)) return null;
+  return parts;
+}
+const WIZ_STEPS = [
+  { key: 'title', ask: '📛 *Project name?* (for example: Green Valley)', err: 'Please send a project name of 3 to 40 characters.',
+    parse: (v) => (v.length >= 3 && v.length <= 40 ? v : null) },
+  { key: 'place', ask: '📍 *Location?* (for example: Shadnagar, Hyderabad)', err: 'Please send the location (up to 60 characters).',
+    parse: (v) => (v.length >= 2 && v.length <= 60 ? v : null) },
+  { key: 'kind', ask: '🏷️ *What type of project is it?* (for example: DTCP approved open plots / 3 BHK villas / farm land)',
+    err: 'Please describe the type in a few words (up to 60 characters).', parse: (v) => (v.length >= 3 && v.length <= 60 ? v : null) },
+  { key: 'price', ask: '💰 *Approximate price range in lakhs?* For example *20-30* (or a single number like *45*)',
+    err: 'I could not read that. Please send like *20-30* or *45* (in lakhs).', parse: parseRange },
+  { key: 'highlights', ask: '⭐ *Key highlights* – send 3 to 5 points, one per line (or separated by ;)', err: 'Please send at least one highlight (each under 120 characters).',
+    parse: parseHighlights },
+  { key: 'approval', ask: '✅ *Approval details?* (for example: DTCP & RERA approved) – or type *skip*', optional: true,
+    err: 'Please send the approval details, or type *skip*.', parse: (v) => (v.length <= 120 ? v : null) },
+  { key: 'link', ask: '🔗 *Project link?* (website or photos page) – or type *skip*', optional: true,
+    err: 'Please send a link like https://example.com, or type *skip*.', parse: parseLink },
+];
+const adminWiz = new Map();       // owner chat -> { type, step, data }
+const loginFails = new Map();     // chat -> { n, until }
+
+function isOwner(ctx) {
+  if (OWNER_NUMBER && ctx.phoneKnown && String(ctx.phone).slice(-10) === OWNER_NUMBER.slice(-10)) return true;
+  return adminIds.has(ctx.from);
+}
+function adminWants(ctx, body) {                              // sync: should this message go to the admin handler?
+  const t = String(body || '').trim();
+  if (isOwner(ctx)) return adminWiz.has(ctx.phone) || /^\/?admin\b/i.test(t);
+  const f = loginFails.get(ctx.from);
+  if (f && f.until > Date.now()) return false;
+  return !!ADMIN_PIN && /^\/?admin\s+login\s+\S+\s*$/i.test(t);
+}
+
+const ADMIN_HELP = [
+  '🛠️ *Owner admin menu*', '',
+  '*admin projects* – list all projects',
+  '*admin add project* – add a new project (I will ask step by step)',
+  '*admin delete project 3* – delete project number 3',
+  '*admin price 3 25-35* – change the price range (lakhs) of project 3',
+  '*admin link 3 https://…* – change the link of project 3', '',
+  '*admin offers* – show current offers',
+  '*admin add offer <text>* – add an offer',
+  '*admin delete offer 1* – delete offer number 1',
+  '*admin clear offers* – remove all offers', '',
+  'Say *cancel* at any time to stop. Changes go live for customers immediately.',
+  'To chat with the bot as a normal customer, just type your message without the word *admin*.',
+].join('\n');
+
+const projectList = () => PROJECT_KEYS.map((k, i) => `${i + 1}. *${PROJECTS[k].title}* – ${PROJECTS[k].place} • ${priceStr(k)}`).join('\n') || '(no projects)';
+const offerList = () => OFFERS.map((o, i) => `${i + 1}. ${o}`).join('\n') || '(no offers right now)';
+function previewText(d) {
+  return ['📋 *Please check the details:*', '',
+    `🏡 Name: ${d.title}`, `📍 Place: ${d.place}`, `🏷️ Type: ${d.kind}`,
+    `💰 Price: ${d.price[0] === d.price[1] ? `₹${d.price[0]}` : `₹${d.price[0]}–${d.price[1]}`} lakhs`,
+    '⭐ Highlights:', ...d.highlights.map((h) => `✔ ${h}`),
+    `✅ Approval: ${d.approval || '-'}`, `🔗 Link: ${d.link || BIZ.website}`, '',
+    'Reply *yes* to save, or *cancel* to stop.'].join('\n');
+}
+function projectByArg(arg) {
+  const n = parseInt(arg, 10);
+  return n >= 1 && n <= PROJECT_KEYS.length ? PROJECT_KEYS[n - 1] : null;
+}
+
+async function adminRun(ctx, body) {
+  const send = (txt) => withTimeout(ctx.client.sendMessage(ctx.from, txt), 30000);
+  const t = String(body || '').trim();
+  const low = t.toLowerCase().replace(/^\//, '');
+  try {
+    // ---- login with PIN (for owners whose real number WhatsApp hides)
+    if (!isOwner(ctx)) {
+      const m = t.match(/^\/?admin\s+login\s+(\S+)\s*$/i);
+      if (!m) return;
+      if (m[1] === ADMIN_PIN) {
+        adminIds.add(ctx.from); saveAdmins(); loginFails.delete(ctx.from);
+        console.log('🔑 Admin access granted to', ctx.from);
+        return send('✅ *Admin access enabled* for this chat.\n\n' + ADMIN_HELP);
+      }
+      const f = loginFails.get(ctx.from) || { n: 0, until: 0 };
+      f.n += 1;
+      if (f.n >= 5) { f.until = Date.now() + 3600_000; f.n = 0; }
+      loginFails.set(ctx.from, f);
+      return;                                                    // silent: customers never learn that admin mode exists
+    }
+
+    // ---- a question/answer flow is running
+    const w = adminWiz.get(ctx.phone);
+    if (w) {
+      if (/^(admin\s+)?(cancel|stop|exit)$/.test(low)) { adminWiz.delete(ctx.phone); return send('Cancelled ✅ Nothing was changed.'); }
+      if (w.type === 'confirm_delete') {
+        adminWiz.delete(ctx.phone);
+        if (/^(yes|y|confirm)$/.test(low) && PROJECTS[w.key]) {
+          const title = PROJECTS[w.key].title;
+          deleteProject(w.key);
+          return send(`🗑️ *${title}* was deleted. Customers will not see it any more.\n\nCurrent projects:\n${projectList()}`);
+        }
+        return send('Okay, nothing was deleted.');
+      }
+      if (w.type === 'confirm_add') {
+        if (/^(yes|y|confirm|save)$/.test(low)) {
+          adminWiz.delete(ctx.phone);
+          const key = addProject(w.data);
+          const idx = PROJECT_KEYS.indexOf(key);
+          return send(`✅ *${w.data.title}* was added as project number ${idx + 1}. It is live now.` +
+            (idx >= 5 ? '\n\nℹ️ The numbered main menu shows only the first 5 projects, so this one appears as ▫️ and customers reach it by typing its name.' : '') +
+            '\n\nTip: send *admin price ' + (idx + 1) + ' 20-30* or *admin link ' + (idx + 1) + ' https://…* to change details later.');
+        }
+        return send('Please reply *yes* to save, or *cancel* to stop.');
+      }
+      // add-project questions
+      const step = WIZ_STEPS[w.step];
+      let val;
+      if (step.optional && /^(skip|no|none|-)$/.test(low)) val = '';
+      else { val = step.parse(t); if (val === null) return send(step.err); }
+      w.data[step.key] = val; w.step += 1;
+      if (w.step < WIZ_STEPS.length) return send(WIZ_STEPS[w.step].ask);
+      w.type = 'confirm_add';
+      return send(previewText(w.data));
+    }
+
+    // ---- commands
+    const cmd = low.replace(/^admin\s*/, '').trim();
+    let m;
+    if (!cmd || cmd === 'help' || cmd === 'menu') return send(ADMIN_HELP);
+    if (cmd === 'projects' || cmd === 'list') return send(`🏡 *Projects*\n${projectList()}`);
+    if (/^add\s+project$/.test(cmd)) {
+      if (PROJECT_KEYS.length >= MAX_PROJECTS) return send(`You already have ${MAX_PROJECTS} projects (the maximum). Delete one first with *admin delete project <number>*.`);
+      adminWiz.set(ctx.phone, { type: 'add', step: 0, data: {} });
+      return send('Let us add a new project. Say *cancel* any time to stop.\n\n' + WIZ_STEPS[0].ask);
+    }
+    if ((m = cmd.match(/^(?:delete|remove)\s+project\s+(\d+)$/))) {
+      const k = projectByArg(m[1]);
+      if (!k) return send(`There is no project number ${m[1]}.\n\n${projectList()}`);
+      adminWiz.set(ctx.phone, { type: 'confirm_delete', key: k });
+      return send(`⚠️ Delete *${PROJECTS[k].title}*? Customers will no longer see it.\nReply *yes* to delete or *cancel* to keep it.`);
+    }
+    if ((m = cmd.match(/^price\s+(\d+)\s+(.+)$/))) {
+      const k = projectByArg(m[1]); const r = parseRange(m[2]);
+      if (!k) return send(`There is no project number ${m[1]}.\n\n${projectList()}`);
+      if (!r) return send('Please send the price like *admin price 3 25-35* (in lakhs).');
+      setPrice(k, r);
+      return send(`💰 Price of *${PROJECTS[k].title}* is now *${priceStr(k)}*.`);
+    }
+    if ((m = t.replace(/^\/?admin\s*/i, '').match(/^link\s+(\d+)\s+(\S+)$/i))) {
+      const k = projectByArg(m[1]); const url = parseLink(m[2]);
+      if (!k) return send(`There is no project number ${m[1]}.\n\n${projectList()}`);
+      if (!url) return send('Please send a valid link like *admin link 3 https://example.com*.');
+      setLink(k, url);
+      return send(`🔗 Link of *${PROJECTS[k].title}* is now ${url}`);
+    }
+    if (cmd === 'offers' || cmd === 'offer') return send(`🎁 *Current offers*\n${offerList()}`);
+    if ((m = t.replace(/^\/?admin\s*/i, '').match(/^add\s+offer\s+([\s\S]+)$/i))) {
+      const text = m[1].trim().slice(0, 200);
+      if (text.length < 3) return send('Please write the offer, for example: *admin add offer 2 gm gold free on plot booking*');
+      OFFERS.push(text); saveOffers();
+      return send(`✅ Offer added. Customers will see it now.\n\n🎁 *Current offers*\n${offerList()}`);
+    }
+    if ((m = cmd.match(/^(?:delete|remove)\s+offer\s+(\d+)$/))) {
+      const i = parseInt(m[1], 10) - 1;
+      if (!OFFERS[i]) return send(`There is no offer number ${m[1]}.\n\n${offerList()}`);
+      const gone = OFFERS.splice(i, 1)[0]; saveOffers();
+      return send(`🗑️ Deleted offer: ${gone}\n\n🎁 *Current offers*\n${offerList()}`);
+    }
+    if (cmd === 'clear offers') { OFFERS = []; saveOffers(); return send('🗑️ All offers removed. Customers will be asked to call for current offers.'); }
+    return send('Sorry, I did not understand that admin command.\n\n' + ADMIN_HELP);
+  } catch (e) {
+    console.error('Admin error:', e.message || e);
+    try { await send('Sorry, something went wrong: ' + (e.message || e)); } catch (_) {}
+  }
+}
+
+
 const SESSION_DIR = path.join(STORAGE, '.wwebjs_auth');
 // remove stale Chrome lock files left by a crash, otherwise Chrome refuses to start
 try {
@@ -1001,17 +1318,11 @@ const client = new Client({
   authTimeoutMs: 120000,
   puppeteer: {
     headless: true,
-    timeout: 120000,
-    protocolTimeout: 120000,
+    timeout: 0,
+    protocolTimeout: 600000,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: [
-      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-gpu', '--no-first-run', '--no-zygote', '--disable-extensions',
-    ],
-  },
-  webVersionCache: {
-    type: 'remote',
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1017054665-alpha.html',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-first-run',
+           '--no-zygote', '--disable-extensions'],
   },
 });
 
@@ -1112,16 +1423,34 @@ async function resolvePhone(msg, from) {
   if (!from.endsWith('@lid')) return { phone: from.split('@')[0], known: true };
   const hit = lidCache.get(from);
   if (hit && (hit.known || Date.now() - hit.at < 600000)) return hit;
+  const lidDigits = from.split('@')[0];
+  // a real phone is 8-15 digits AND is not the hidden id itself (the old code accepted the hidden id by mistake)
+  const real = (n) => { const d = String(n || '').replace(/\D/g, ''); return /^\d{8,15}$/.test(d) && d !== lidDigits ? d : null; };
   let phone = null;
-  try { const c = await withTimeout(msg.getContact(), 4000); if (c && /^\d{8,15}$/.test(c.number || '')) phone = c.number; } catch (_) {}
+  try {
+    const c = await withTimeout(msg.getContact(), 4000);
+    if (c) phone = real(c.number) || real(c.phoneNumber) || (c.id && c.id.server === 'c.us' ? real(c.id.user) : null);
+  } catch (_) {}
   if (!phone && typeof client.getContactLidAndPhone === 'function') {
     try {
       const r = await withTimeout(client.getContactLidAndPhone([from]), 4000);
       const pn = r && r[0] && r[0].pn;
-      if (pn) phone = String(pn).split('@')[0];
+      if (pn) phone = real(String(pn).split('@')[0]);
     } catch (_) {}
   }
-  const res = phone ? { phone, known: true, at: Date.now() } : { phone: from.split('@')[0], known: false, at: Date.now() };
+  if (!phone && client.pupPage) {                       // best effort: ask WhatsApp Web's own lid -> phone table
+    try {
+      const pn = await withTimeout(client.pupPage.evaluate((lid) => {
+        try {
+          const w = window.Store.WidFactory.createWid(lid);
+          const r = window.Store.LidUtils.getPhoneNumber(w);
+          return r ? (r._serialized || String(r)) : null;
+        } catch (e) { return null; }
+      }, from), 4000);
+      if (pn) phone = real(String(pn).split('@')[0]);
+    } catch (_) {}
+  }
+  const res = phone ? { phone, known: true, at: Date.now() } : { phone: lidDigits, known: false, at: Date.now() };
   lidCache.set(from, res);
   console.log(phone ? `   resolved real number: ${phone}` : '   (WhatsApp is hiding this customer\'s real number; the bot will ask for it when a lead is created)');
   return res;
@@ -1148,6 +1477,12 @@ async function onIncoming(msg, source) {
     const waName = raw.notifyName || '';
     const { phone, known: phoneKnown } = await resolvePhone(msg, from);
 
+    // owner admin commands ("admin ...") are handled here and are NOT logged as customer chats
+    const adminCtx = { from, phone, phoneKnown, client };
+    if (msg.type === 'chat' && adminWants(adminCtx, msg.body)) {
+      return enqueue(phone, () => adminRun(adminCtx, msg.body));
+    }
+
     const cust = customer(phone);
     if (waName && cust.waName !== waName) { cust.waName = waName; saveCustomers(); }
     const shownName = cust.name || waName;
@@ -1169,7 +1504,7 @@ async function onIncoming(msg, source) {
     }
     logMessage('IN', phone, shownName, msg.body);
     syncCustomer(phone, msg.body, true);
-    enqueue(phone, () => handle({ phone, phoneKnown, name: waName, say, client }, msg.body));
+    enqueue(phone, () => handle({ phone, phoneKnown, name: waName, say, client, from }, msg.body));
   } catch (e) {
     console.error('Message error:', e.message || e);
   }
@@ -1199,4 +1534,5 @@ async function start(attempt = 1) {
   }
 }
 if (require.main === module) start();
-module.exports = { handle, detectProjects, detectTopics, getSession, extractName, guardOut, isDuplicateIn, start };
+module.exports = { handle, detectProjects, detectTopics, getSession, extractName, guardOut, isDuplicateIn, start,
+  adminWants, adminRun, saveLead, resolvePhone, PROJECTS, mainMenu, GENERAL, offerText };
